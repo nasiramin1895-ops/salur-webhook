@@ -13,26 +13,23 @@ const TOYYIBPAY_SECRET_KEY = process.env.TOYYIBPAY_SECRET_KEY;
 
 const CATEGORY_CODE = "8h4pisjz"; 
 
-// 🛠️ FUNGSI AUTO-PROVISIONING (CIPTA INSTANCE)
+// 🛠️ FUNGSI AUTO-PROVISIONING
 async function autoProvisionInstance(orderId, amount) {
   try {
-    // 1. Cipta Butiran Unik Instance (Simulasi)
     const instanceId = "SALUR-INST-" + Math.floor(1000 + Math.random() * 9000);
     const accessKey = "sk_live_" + crypto.randomBytes(8).toString("hex");
     const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 30); // Tempoh 30 Hari
+    expiryDate.setDate(expiryDate.getDate() + 30); // 30 Hari
 
     console.log(`\n⚙️ Membina Instance Baharu untuk Order: ${orderId}...`);
-    console.log(`✅ Instance Berjaya Dicipta: ${instanceId}`);
 
-    // 2. Hantar Maklumat Instance ke Telegram
     const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     const message = `🚀 *AUTO-PROVISIONING SUCCESSFUL!*\n\n` +
                     `🏢 *Order ID:* ${orderId}\n` +
                     `📦 *Instance ID:* \`${instanceId}\`\n` +
                     `🔑 *Access Key:* \`${accessKey}\`\n` +
                     `📅 *Tarikh Luput:* ${expiryDate.toLocaleDateString("ms-MY")}\n\n` +
-                    `🤖 *Note:* Instance telah diaktifkan secara automatik di pelayan Cloud Salur.`;
+                    `🤖 *Note:* Instance telah diaktifkan secara automatik.`;
 
     await axios.post(telegramUrl, {
       chat_id: TELEGRAM_CHAT_ID,
@@ -49,8 +46,6 @@ async function autoProvisionInstance(orderId, amount) {
 app.all("/webhook", async (req, res) => {
   try {
     const data = { ...req.query, ...req.body };
-    console.log("\n📩 Mesej Masuk Dari ToyyibPay (Full Data):", data);
-
     const status = data.status_id || data.status;
 
     if (status === "1" || status === 1) {
@@ -59,7 +54,6 @@ app.all("/webhook", async (req, res) => {
       const amount = data.transaction_amount || data.amount || "0.00";
       const profit = (parseFloat(amount) - 1.00).toFixed(2);
 
-      // A. Hantar Notifikasi Kewangan
       const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
       const message = `💰 *BAYARAN SEBENAR BERJAYA!*\n\n` +
                       `🏢 *Order ID:* ${orderId}\n` +
@@ -74,7 +68,6 @@ app.all("/webhook", async (req, res) => {
         parse_mode: "Markdown"
       });
 
-      // B. JALANKAN AUTO-PROVISIONING SECARA AUTOMATIK!
       await autoProvisionInstance(orderId, amount);
     }
     res.status(200).send("OK");
@@ -84,21 +77,33 @@ app.all("/webhook", async (req, res) => {
   }
 });
 
-// 2️⃣ PINTU CIPTA BIL AUTOMATIK
+// 2️⃣ PINTU CIPTA BIL AUTOMATIK (DINAMIK)
 app.get("/bayar", async (req, res) => {
   try {
+    // Tangkap nama pakej & harga dari URL (atau guna default jika tiada)
+    const pakej = req.query.pakej || "Ujian";
+    const hargaRM = req.query.harga || "1.00"; 
+    
+    // Tukar RM ke bentuk sen untuk ToyyibPay
+    const amountInCents = Math.round(parseFloat(hargaRM) * 100).toString();
+
     const formData = new URLSearchParams();
     formData.append("userSecretKey", TOYYIBPAY_SECRET_KEY);
     formData.append("categoryCode", CATEGORY_CODE);
-    formData.append("billName", "Sistem Salur Instance");
-    formData.append("billDescription", "Langganan Instance Salur Cloud");
+    
+    // Nama bil dan deskripsi akan berubah ikut pakej
+    formData.append("billName", `Sistem Salur - Pakej ${pakej}`);
+    formData.append("billDescription", `Langganan Pakej ${pakej} (RM ${hargaRM})`);
+    
     formData.append("billPriceSetting", "1");
     formData.append("billPayorInfo", "0");
-    formData.append("billAmount", "100"); // RM1.00
+    formData.append("billAmount", amountInCents); 
     formData.append("billReturnUrl", "https://t.me/BOTA_ANDA");
     formData.append("billCallbackUrl", "https://salur-webhook.onrender.com/webhook");
     
-    formData.append("billExternalReferenceNo", "SALUR-" + Date.now());
+    // Order ID akan memaparkan nama pakej supaya mudah dibaca di Telegram
+    formData.append("billExternalReferenceNo", `SALUR-${pakej.toUpperCase()}-${Date.now()}`);
+    
     formData.append("billTo", "Pelanggan");
     formData.append("billEmail", "tiada@email.com");
     formData.append("billPhone", "0000000000");
@@ -119,5 +124,5 @@ app.get("/bayar", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`\n🚀 Salur Cloud Webhook & Provisioner aktif di port ${PORT}`);
+  console.log(`\n🚀 Salur Cloud Webhook aktif di port ${PORT}`);
 });
