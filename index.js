@@ -26,14 +26,16 @@ app.all("/webhook", async (req, res) => {
       const orderId = data.order_id || data.billcode || "Tiada ID";
       const refNo = data.refno || data.transaction_id || "Tiada Ref";
       const amount = data.transaction_amount || data.amount || "0.00";
-      const profit = (parseFloat(amount) * 0.95).toFixed(2);
+      
+      // 🧮 PENGIRAAN BAHARU: Tolak caj FPX RM1.00 ToyyibPay
+      const profit = (parseFloat(amount) - 1.00).toFixed(2);
 
       const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
       const message = `💰 *BAYARAN SEBENAR BERJAYA! (Auto-Billing)*\n\n` +
                       `🏢 *Order ID:* ${orderId}\n` +
                       `📄 *Ref No:* ${refNo}\n` +
-                      `💵 *Jumlah Jualan:* RM ${amount}\n` +
-                      `✨ *Net Profit (95%):* *RM ${profit}*\n` +
+                      `💵 *Jumlah Bayaran:* RM ${amount}\n` +
+                      `✨ *Net Profit (Tolak RM1):* *RM ${profit}*\n` +
                       `🚀 *Status:* Berjaya diproses oleh Salur Cloud!`;
 
       await axios.post(telegramUrl, {
@@ -63,7 +65,7 @@ app.get("/bayar", async (req, res) => {
     formData.append("billDescription", "Bayaran Ujian Auto-Billing Mr MNA");
     formData.append("billPriceSetting", "1");
     formData.append("billPayorInfo", "0");
-    formData.append("billAmount", "100"); // RM1.00
+    formData.append("billAmount", "100"); // RM1.00 (Dalam sen)
     formData.append("billReturnUrl", "https://t.me/BOTA_ANDA");
     
     // Callback URL (Webhook Render)
