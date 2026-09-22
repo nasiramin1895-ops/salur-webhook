@@ -5,25 +5,25 @@ const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
 
 // ==========================================
-// 1. KONFIGURASI ASAS
+// 1. KONFIGURASI EXPRESS & BOT
 // ==========================================
 const app = express();
 app.use(express.json());
-app.use(express.urlencoded({ extended: true })); // Untuk terima data Webhook dari ToyyibPay
+app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
-const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID; // Letak Chat ID anda untuk terima laporan untung
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 
 // Inisialisasi Bot Telegram
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 
 // ==========================================
-// 2. KONFIGURASI DATABASE (POSTGRESQL RENDER)
+// 2. KONFIGURASI POSTGRESQL (RENDER)
 // ==========================================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // Wajib untuk Render
+    rejectUnauthorized: false // Wajib untuk sambungan SSL Render
   }
 });
 
@@ -39,7 +39,7 @@ async function setupDatabase() {
       );
       CREATE TABLE IF NOT EXISTS access_keys (
           id SERIAL PRIMARY KEY,
-          customer_id INT REFERENCES customers(id),
+          customer_id INT REFERENCES customers(id) ON DELETE CASCADE,
           access_key VARCHAR(255) UNIQUE NOT NULL,
           instance_id VARCHAR(255) UNIQUE NOT NULL,
           pakej VARCHAR(100),
@@ -49,7 +49,7 @@ async function setupDatabase() {
     `);
     console.log("✅ Database sedia digunakan!");
   } catch (err) {
-    console.error("❌ Ralat setup database:", err);
+    console.error("❌ Ralat setup database:", err.message);
   }
 }
 setupDatabase();
@@ -66,17 +66,17 @@ const transporter = nodemailer.createTransport({
 });
 
 // ==========================================
-// 4. ARAHAN BOT TELEGRAM (COMMANDS)
+// 4. ARAHAN BOT TELEGRAM
 // ==========================================
 
 // Arahan /start
 bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
   bot.sendMessage(
-    chatId,
-    `Selamat datang ke Sistem SaaS Kami! 🚀\n\n` +
-    `Jika anda terlupa Access Key, anda boleh dapatkannya semula dengan menaip:\n` +
-    `/recover e-mel_anda@gmail.com`
+    msg.chat.id,
+    "🚀 *Sistem SaaS Beroperasi!*\n\n" +
+    "Jika anda kehilangan Access Key, gunakan arahan berikut untuk pemulihan:\n" +
+    "`/recover e-mel_anda@gmail.com`",
+    { parse_mode: 'Markdown' }
   );
 });
 
@@ -85,7 +85,6 @@ bot.onText(/\/recover (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const inputEmail = match[1].trim().toLowerCase();
 
-  // Validasi format e-mel
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(inputEmail)) {
     return bot.sendMessage(chatId, "❌ Format e-mel tidak sah. Contoh: `/recover nama@gmail.com`", { parse_mode: 'Markdown' });
@@ -104,62 +103,56 @@ bot.onText(/\/recover (.+)/, async (msg, match) => {
       return bot.sendMessage(chatId, "❌ E-mel tidak dijumpai atau tiada Access Key yang aktif.");
     }
 
-    // Susun maklumat jika ada lebih dari 1 langganan
     let senaraiKeys = "";
     result.rows.forEach((row, index) => {
       senaraiKeys += `\n${index + 1}. Pakej: ${row.pakej || 'Standard'}\n   Instance ID: ${row.instance_id}\n   Access Key: ${row.access_key}\n`;
     });
-    
-    // Hantar E-mel
+
+    // Cuba hantar e-mel
     await transporter.sendMail({
-      from: `"Sokongan Sistem" <${process.env.EMAIL_USER}>`,
+      from: `"Sokongan SaaS" <${process.env.EMAIL_USER}>`,
       to: inputEmail,
       subject: 'Pemulihan Access Key Anda',
       text: `Salam,\n\nBerikut adalah maklumat langganan anda yang masih aktif:\n${senaraiKeys}\n\nSila simpan dengan selamat. Terima kasih!`
     });
 
-    // Sembunyikan e-mel untuk mesej Telegram
     const [name, domain] = inputEmail.split('@');
     const maskedEmail = `${name.substring(0, 2)}***@${domain}`;
 
-    bot.sendMessage(chatId, `✅ Berjaya! Maklumat Access Key telah dihantar ke e-mel **${maskedEmail}**. Sila semak *Inbox* atau *Spam*.`, { parse_mode: 'Markdown' });
+    bot.sendMessage(chatId, `✅ Maklumat Access Key telah berjaya dihantar ke e-mel **${maskedEmail}**. Sila semak *Inbox* atau *Spam*.`, { parse_mode: 'Markdown' });
 
   } catch (error) {
-    console.error("Ralat Recover:", error);
-    bot.sendMessage(chatId, "⚠️ Berlaku ralat sistem semasa cuba menghantar e-mel. Sila hubungi admin.");
+    console.error("Ralat Recover Email:", error.message);
+    bot.sendMessage(
+      chatId, 
+      "⚠️ Berlaku ralat penghantaran e-mel. (Pastikan tetapan EMAIL_PASS 16-digit di Render telah dikemas kini)."
+    );
   }
 });
 
-
 // ==========================================
-// 5. SERVER EXPRESS & WEBHOOK TOYYIBPAY
+// 5. SERVER EXPRESS & WEBHOOK
 // ==========================================
 
-// Endpoint ujian untuk pastikan server berjalan
 app.get('/', (req, res) => {
-  res.send('Sistem SaaS & Webhook Beroperasi dengan Cemerlang! 🚀');
+  res.send('🚀 Webhook & Server SaaS Beroperasi Cemerlang!');
 });
 
-// Webhook / Callback dari ToyyibPay
 app.post('/webhook', async (req, res) => {
   try {
-    // 1. Terima data dari ToyyibPay
-    // Nota: Sesuaikan 'req.body' ini mengikut payload sebenar yang dihantar sistem / ToyyibPay anda.
-    const status_id = req.body.status_id; 
-    const order_id = req.body.order_id; // Biasanya kita letak chat_id dalam order_id semasa cipta bil
-    const transaction_amount = parseFloat(req.body.amount || req.body.transaction_amount || 0); 
-    const billEmail = req.body.billEmail || req.body.email || "tiada_emel@sistem.com"; // Emel pelanggan
-    const namaPakej = req.body.pakej || "Pakej Dinamik"; // Dihantar melalui parameter / bil
+    const status_id = req.body.status_id;
+    const order_id = req.body.order_id;
+    const transaction_amount = parseFloat(req.body.amount || req.body.transaction_amount || 0);
+    const billEmail = (req.body.billEmail || req.body.email || "tiada_emel@sistem.com").trim().toLowerCase();
+    const namaPakej = req.body.pakej || "Pakej Dinamik";
 
-    // status_id = 1 bermaksud Bayaran Berjaya di ToyyibPay
+    // Status 1 = Bayaran Berjaya
     if (status_id === '1' || status_id === 1) {
       
-      // 2. Auto-Provisioning (Jana Instance ID & Access Key)
       const instanceId = "INST-" + Math.random().toString(36).substring(2, 8).toUpperCase();
       const accessKey = "AK-" + Math.random().toString(36).substring(2, 12).toUpperCase();
 
-      // 3. Simpan ke Database (PostgreSQL)
-      // Simpan/Update Pelanggan
+      // 1. Simpan Pelanggan ke Database
       const custResult = await pool.query(`
         INSERT INTO customers (email, telegram_id) 
         VALUES ($1, $2) 
@@ -169,24 +162,24 @@ app.post('/webhook', async (req, res) => {
 
       const customerId = custResult.rows[0].id;
 
-      // Simpan Access Key
+      // 2. Simpan Access Key ke Database
       await pool.query(`
         INSERT INTO access_keys (customer_id, access_key, instance_id, pakej, status) 
         VALUES ($1, $2, $3, $4, 'ACTIVE')
       `, [customerId, accessKey, instanceId, namaPakej]);
 
-      // 4. Hantar Produk ke Pelanggan di Telegram
-      const mesejPelanggan = `🎉 *Bayaran Berjaya!*\n\nTerima kasih kerana melanggan ${namaPakej}.\n\n` +
-                             `🖥️ *Instance ID:* \`${instanceId}\`\n` +
-                             `🔑 *Access Key:* \`${accessKey}\`\n\n` +
-                             `Sila simpan maklumat ini. Jika hilang, anda boleh taip /recover ${billEmail}`;
-                             
-      bot.sendMessage(order_id, mesejPelanggan, { parse_mode: 'Markdown' });
+      // 3. Hantar mesej produk ke Pelanggan di Telegram
+      if (order_id) {
+        const mesejPelanggan = `🎉 *Bayaran Berjaya!*\n\nTerima kasih kerana melanggan *${namaPakej}*.\n\n` +
+                               `🖥️ *Instance ID:* \`${instanceId}\`\n` +
+                               `🔑 *Access Key:* \`${accessKey}\`\n\n` +
+                               `Sila simpan maklumat ini. Jika hilang, anda boleh gunakan arahan /recover ${billEmail}`;
 
-      // 5. Pengiraan Keuntungan & Laporan kepada Admin
-      // Tolak RM1.00 (Caj FPX ToyyibPay)
+        bot.sendMessage(order_id, mesejPelanggan, { parse_mode: 'Markdown' }).catch(e => console.error("Ralat Hantar Mesej Pelanggan:", e.message));
+      }
+
+      // 4. Laporan Keuntungan bersih ke Admin Telegram
       const untungBersih = transaction_amount - 1.00;
-
       if (ADMIN_CHAT_ID) {
         const mesejAdmin = `💰 *JUALAN BARU MASUK!*\n\n` +
                            `📦 Pakej: ${namaPakej}\n` +
@@ -194,26 +187,25 @@ app.post('/webhook', async (req, res) => {
                            `🏦 Caj FPX: RM 1.00\n` +
                            `✅ *Untung Bersih: RM ${untungBersih.toFixed(2)}*\n\n` +
                            `📧 E-mel: ${billEmail}`;
-        
-        bot.sendMessage(ADMIN_CHAT_ID, mesejAdmin, { parse_mode: 'Markdown' });
+
+        bot.sendMessage(ADMIN_CHAT_ID, mesejAdmin, { parse_mode: 'Markdown' }).catch(e => console.error("Ralat Hantar Mesej Admin:", e.message));
       }
 
-      console.log(`✅ Transaksi Berjaya diproses untuk ${billEmail}`);
-      res.status(200).send("OK");
+      console.log(`✅ Transaksi berjaya disimpan & diproses untuk ${billEmail}`);
+      return res.status(200).send("OK");
 
     } else {
-      // Bayaran gagal atau pending
-      console.log(`⚠️ Status Bayaran Gagal/Pending: ${status_id}`);
-      res.status(400).send("Bayaran tidak berjaya");
+      console.log(`⚠️ Status Bayaran Tidak Berjaya: ${status_id}`);
+      return res.status(400).send("Bayaran tidak berjaya");
     }
-    
+
   } catch (err) {
-    console.error("❌ Ralat pada Webhook:", err);
-    res.status(500).send("Internal Server Error");
+    console.error("❌ Ralat Webhook:", err);
+    return res.status(500).send("Internal Server Error");
   }
 });
 
-// Mulakan Server
-app.listen(PORT, () => {
+// Jalankan Server (Bind ke 0.0.0.0 untuk Render)
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server berjalan di port ${PORT}`);
 });
