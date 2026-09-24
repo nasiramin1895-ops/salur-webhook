@@ -3,6 +3,7 @@ const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
+const axios = require('axios');
 
 // ==========================================
 // 1. KONFIGURASI EXPRESS & BOT
@@ -14,6 +15,9 @@ app.use(express.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 
+// 🔗 URL CLOUDFLARE TUNNEL PC
+const LOCAL_PC_SYNC_URL = "https://intensive-drilling-mixer-controversial.trycloudflare.com/sync-data";
+
 // Inisialisasi Bot Telegram
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 
@@ -23,7 +27,7 @@ const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // Wajib untuk sambungan SSL Render
+    rejectUnauthorized: false
   }
 });
 
@@ -47,7 +51,7 @@ async function setupDatabase() {
           dicipta_pada TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log("✅ Database sedia digunakan!");
+    console.log("✅ Database Render Postgres sedia digunakan!");
   } catch (err) {
     console.error("❌ Ralat setup database:", err.message);
   }
@@ -108,7 +112,6 @@ bot.onText(/\/recover (.+)/, async (msg, match) => {
       senaraiKeys += `\n${index + 1}. Pakej: ${row.pakej || 'Standard'}\n   Instance ID: ${row.instance_id}\n   Access Key: ${row.access_key}\n`;
     });
 
-    // Cuba hantar e-mel
     await transporter.sendMail({
       from: `"Sokongan SaaS" <${process.env.EMAIL_USER}>`,
       to: inputEmail,
@@ -141,18 +144,19 @@ app.get('/', (req, res) => {
 app.post('/webhook', async (req, res) => {
   try {
     const status_id = req.body.status_id;
-    const order_id = req.body.order_id;
+    const order_id = req.body.order_id || "SALUR-MANUAL-" + Date.now();
     const transaction_amount = parseFloat(req.body.amount || req.body.transaction_amount || 0);
     const billEmail = (req.body.billEmail || req.body.email || "tiada_emel@sistem.com").trim().toLowerCase();
     const namaPakej = req.body.pakej || "Pakej Dinamik";
+    const refNo = req.body.refno || req.body.transaction_id || "REF-BANK-999";
 
-    // Status 1 = Bayaran Berjaya
     if (status_id === '1' || status_id === 1) {
       
       const instanceId = "INST-" + Math.random().toString(36).substring(2, 8).toUpperCase();
       const accessKey = "AK-" + Math.random().toString(36).substring(2, 12).toUpperCase();
+      const untungBersih = transaction_amount - 1.00;
 
-      // 1. Simpan Pelanggan ke Database
+      // 1. Simpan ke Render Postgres
       const custResult = await pool.query(`
         INSERT INTO customers (email, telegram_id) 
         VALUES ($1, $2) 
@@ -162,13 +166,34 @@ app.post('/webhook', async (req, res) => {
 
       const customerId = custResult.rows[0].id;
 
-      // 2. Simpan Access Key ke Database
       await pool.query(`
         INSERT INTO access_keys (customer_id, access_key, instance_id, pakej, status) 
         VALUES ($1, $2, $3, $4, 'ACTIVE')
       `, [customerId, accessKey, instanceId, namaPakej]);
 
-      // 3. Hantar mesej produk ke Pelanggan di Telegram
+      // 2. SYNC KE LOCAL PC DATABASE (CLOUDFLARE TUNNEL)
+      if (LOCAL_PC_SYNC_URL.startsWith("http")) {
+        try {
+          const expiryDate = new Date();
+          expiryDate.setDate(expiryDate.getDate() + 30);
+          
+          await axios.post(LOCAL_PC_SYNC_URL, {
+            orderId: order_id,
+            refNo: refNo,
+            pakejName: namaPakej,
+            amountPaid: transaction_amount,
+            netProfit: untungBersih,
+            instanceId: instanceId,
+            accessKey: accessKey,
+            expiryDate: expiryDate.toISOString().split('T')[0]
+          });
+          console.log(`✅ Data transaksi berjaya dihantar ke Local PC Database!`);
+        } catch (errSync) {
+          console.error(`⚠️ Ralat Sync ke Local PC:`, errSync.message);
+        }
+      }
+
+      // 3. Telegram Pelanggan
       if (order_id) {
         const mesejPelanggan = `🎉 *Bayaran Berjaya!*\n\nTerima kasih kerana melanggan *${namaPakej}*.\n\n` +
                                `🖥️ *Instance ID:* \`${instanceId}\`\n` +
@@ -178,8 +203,7 @@ app.post('/webhook', async (req, res) => {
         bot.sendMessage(order_id, mesejPelanggan, { parse_mode: 'Markdown' }).catch(e => console.error("Ralat Hantar Mesej Pelanggan:", e.message));
       }
 
-      // 4. Laporan Keuntungan bersih ke Admin Telegram
-      const untungBersih = transaction_amount - 1.00;
+      // 4. Telegram Admin
       if (ADMIN_CHAT_ID) {
         const mesejAdmin = `💰 *JUALAN BARU MASUK!*\n\n` +
                            `📦 Pakej: ${namaPakej}\n` +
@@ -205,7 +229,6 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Jalankan Server (Bind ke 0.0.0.0 untuk Render)
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server berjalan di port ${PORT}`);
 });
