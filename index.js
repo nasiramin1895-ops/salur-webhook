@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 
 // 🔗 URL CLOUDFLARE TUNNEL PC
-const LOCAL_PC_SYNC_URL = "https://intensive-drilling-mixer-controversial.trycloudflare.com/sync-data";
+const LOCAL_PC_SYNC_URL = "https://revisions-submissions-growing-advisors.trycloudflare.com/sync-data";
 
 // Inisialisasi Bot Telegram
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
